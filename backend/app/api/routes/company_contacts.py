@@ -43,6 +43,7 @@ def search_company_contacts(
     - page / page_size : pagination (1-based)
     """
 
+    #  pagination
     if page < 1:
         page = 1
     if page_size < 1:
@@ -50,12 +51,17 @@ def search_company_contacts(
     if page_size > 200:
         page_size = 200
 
-    # ---- requête de base sur Company.id avec jointures ----
-    base_query = (
-        db.query(Company.id)
-        .outerjoin(Contact, Contact.company_id == Company.id)
-        .outerjoin(ProspectionMeta, ProspectionMeta.company_id == Company.id)
-    )
+    base_query = db.query(Company)
+
+    if status:
+        base_query = base_query.outerjoin(
+            ProspectionMeta, ProspectionMeta.company_id == Company.id
+        )
+
+    if q:
+        base_query = base_query.outerjoin(
+            Contact, Contact.company_id == Company.id
+        )
 
     conditions = []
 
@@ -89,30 +95,38 @@ def search_company_contacts(
     if conditions:
         base_query = base_query.filter(and_(*conditions))
 
-    # ---- Total distinct de companies correspondant aux filtres ----
-    # subquery distinct pour éviter les doublons liés aux contacts/leads.
-    filtered_ids_subq = base_query.distinct().subquery()
-    total = db.query(func.count()).select_from(filtered_ids_subq).scalar() or 0
+    ids_subq = (
+        base_query
+        .with_entities(
+            Company.id.label("id"),
+            Company.updated_at.label("updated_at"),
+        )
+        .distinct()
+        .subquery()
+    )
 
+    # Total des companies filtrées
+    total = db.query(func.count()).select_from(ids_subq).scalar() or 0
     if total == 0:
         return CompanyContactsSearchResponse(total=0, items=[])
 
-    # ---- Pagination sur les IDs ----
     offset = (page - 1) * page_size
 
     paged_ids_rows = (
-        db.query(filtered_ids_subq.c.id)
-        .order_by(filtered_ids_subq.c.id)
+        db.query(ids_subq.c.id)
+        .order_by(
+            ids_subq.c.updated_at.desc(), 
+            ids_subq.c.id.desc(),          
+        )
         .offset(offset)
         .limit(page_size)
         .all()
     )
-    company_ids = [row[0] for row in paged_ids_rows]
 
+    company_ids = [row[0] for row in paged_ids_rows]
     if not company_ids:
         return CompanyContactsSearchResponse(total=total, items=[])
 
-    # ---- Charger les Company + relations (contacts + prospection_meta) ----
     companies: List[Company] = (
         db.query(Company)
         .options(
@@ -123,20 +137,22 @@ def search_company_contacts(
         .all()
     )
 
-    # remet les companies dans l'ordre de company_ids
     company_by_id: Dict[int, Company] = {c.id: c for c in companies}
-    ordered_companies = [company_by_id[cid] for cid in company_ids if cid in company_by_id]
+    ordered_companies = [
+        company_by_id[cid] for cid in company_ids if cid in company_by_id
+    ]
 
-    # ---- Mapper vers la réponse Pydantic ----
     items: List[CompanyWithContacts] = []
 
     for company in ordered_companies:
-        company_schema = CompanyDetail.from_orm(company)
+        company_schema = CompanyDetail.model_validate(company)
         contacts_schema = [
-            ContactListItem.from_orm(contact) for contact in company.contacts
+            ContactListItem.model_validate(contact)
+            for contact in company.contacts
         ]
         leads_schema = [
-            ProspectionMetaBase.from_orm(meta) for meta in company.prospect_metas
+            ProspectionMetaBase.model_validate(meta)
+            for meta in company.prospect_metas
         ]
 
         items.append(

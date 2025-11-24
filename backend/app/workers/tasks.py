@@ -171,7 +171,7 @@ def process_url_scan_job(job_id: int) -> None:
                     company_id=company.id,
                     full_name=parsed.full_name,
                     role_title=parsed.role_title,
-                    email=parsed.email,
+                    email=parsed.email if parsed.email else None,
                     phone=parsed.phone,
                     linkedin_url=parsed.linkedin_url,
                     is_decision_maker=False,  # mis à jour par l'IA plus bas
