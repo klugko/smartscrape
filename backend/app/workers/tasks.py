@@ -57,7 +57,6 @@ def _build_text_corpus(pages_html: List[str], per_page_limit: int = 2000) -> str
         return ""
 
     corpus = " \n\n".join(chunks)
-    # on laisse la logique de trimming à enrich_company_with_llm et aux appels LLM
     return corpus
 
 
