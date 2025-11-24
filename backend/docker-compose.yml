@@ -1,6 +1,18 @@
-version: "3.9"
-
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: smartscrape_db
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   api:
     build:
       context: .
@@ -10,8 +22,10 @@ services:
     env_file:
       - .env
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     ports:
       - "8080:8080"
 
@@ -24,19 +38,12 @@ services:
     env_file:
       - .env
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     command: >
       sh -c "python -m app.workers.worker"
-
-  db:
-    image: postgres:16-alpine
-    container_name: smartscrape_db
-    restart: unless-stopped
-    env_file:
-      - .env
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
 
   redis:
     image: redis:7-alpine
